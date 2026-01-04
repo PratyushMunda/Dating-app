@@ -76,13 +76,13 @@ export default function App() {
 
       // MOCK candidate (replace later)
       const candidate = {
-        latitude: userLocation.latitude + 0.0003,
-        longitude: userLocation.longitude + 0.0003,
+        latitude: userLocation.latitude + 0.0007,
+        longitude: userLocation.longitude + 0.0007,
       };
 
       const dist = distanceInMeters(userLocation, candidate);
 
-      if (dist < 80) {
+      if (dist < 1000) {
         dispatchMachine('NEARBY_DETECTED');
       }
     },
