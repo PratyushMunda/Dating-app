@@ -19,6 +19,10 @@ import HomeScreen from './pages/HomeScreen';
 import NavigatingScreen from './pages/NavigatingScreen';
 import VeryCloseScreen from './pages/VeryCloseScreen';
 import MatchedScreen from './pages/MatchedScreen';
+import { sendPresence } from './src/pairingApi';
+
+
+
 
 const { DateMode } = NativeModules;
 const Stack = createNativeStackNavigator();
@@ -55,6 +59,13 @@ function distanceInMeters(a: LatLng, b: LatLng): number {
 /* ---------- app ---------- */
 
 export default function App() {
+  const userIdRef = useRef<string>(
+  Math.random().toString(36).slice(2)
+);
+const userId = userIdRef.current;
+  const [pairId, setPairId] = useState<string | null>(null);
+
+
   const [loading, setLoading] = useState<boolean>(true);
   const [sessionStartedAt, setSessionStartedAt] = useState<number | null>(null);
   const [, forceTick] = useState<number>(0);
@@ -69,6 +80,7 @@ export default function App() {
 
   const appState = useRef<AppStateStatus>(AppState.currentState);
   const [isForeground, setIsForeground] = useState<boolean>(true);
+  
 
   useEffect(() => {
   if (Platform.OS === 'android') {
@@ -82,15 +94,18 @@ export default function App() {
 
   /* 📍 GPS — foreground only */
   useEffect(() => {
-    if (machineState !== 'DATE_MODE_ON') return;
+  if (machineState !== 'DATE_MODE_ON') return;
 
-    const watchId = Geolocation.watchPosition(
-      pos => {
+  const watchId = Geolocation.watchPosition(
+    pos => {
+      // wrap async logic inside an IIFE
+      (async () => {
         const user: LatLng = {
           latitude: pos.coords.latitude,
           longitude: pos.coords.longitude,
         };
 
+        // MOCK candidate (temporary, fine for now)
         const candidate: LatLng = {
           latitude: user.latitude + 0.0007,
           longitude: user.longitude + 0.0007,
@@ -102,18 +117,33 @@ export default function App() {
         const dist = distanceInMeters(user, candidate);
 
         if (dist < 1000) {
-          dispatchMachine('NEARBY_DETECTED');
-        }
-      },
-      err => console.warn(err),
-      {
-        enableHighAccuracy: true,
-        distanceFilter: 10,
-      }
-    );
+          try {
+            const res = await sendPresence(
+              userId,
+              user.latitude,
+              user.longitude
+            );
 
-    return () => Geolocation.clearWatch(watchId);
-  }, [machineState]);
+            if (res.status === 'PAIRED') {
+              setPairId(res.pairId);
+              dispatchMachine('NEARBY_DETECTED');
+            }
+          } catch (err) {
+            console.warn('sendPresence failed', err);
+          }
+        }
+      })();
+    },
+    err => console.warn(err),
+    {
+      enableHighAccuracy: true,
+      distanceFilter: 10, // meters
+    }
+  );
+
+  return () => Geolocation.clearWatch(watchId);
+}, [machineState]);
+
 
   /* 🔔 Notification permission */
   useEffect(() => {
@@ -129,6 +159,7 @@ export default function App() {
     const load = async () => {
       const dm = await AsyncStorage.getItem(DATE_MODE_KEY);
       const ss = await AsyncStorage.getItem(SESSION_START_KEY);
+      
 
       if (dm === 'true') dispatchMachine('DATE_MODE_ENABLED');
       if (ss) setSessionStartedAt(Number(ss));
