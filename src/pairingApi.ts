@@ -1,12 +1,19 @@
 export type PresenceResponse =
   | { status: 'WAITING' }
-  | { status: 'PAIRED'; pairId: string };
+  | { status: 'PAIRED'; pairId: string; otherUser: { userId: string; lat: number; lon: number } };
 
 export type DecisionResponse =
   | { result: 'MATCH_CONFIRMED' }
   | { result: 'CANCELLED' }
   | { status: 'WAITING_OTHER' }
   | { status: 'EXPIRED' };
+
+export type LocationResponse = {
+  userId: string;
+  lat: number;
+  lon: number;
+  lastSeen: string;
+};
 
 const BASE_URL = 'https://irldate-server.onrender.com';
 
@@ -35,5 +42,13 @@ export async function sendDecision(
     body: JSON.stringify({ pairId, userId, decision }),
   });
 
+  return res.json();
+}
+
+export async function getPairedUserLocation(
+  pairId: string,
+  userId: string
+): Promise<LocationResponse> {
+  const res = await fetch(`${BASE_URL}/location/${pairId}/${userId}`);
   return res.json();
 }

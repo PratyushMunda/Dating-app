@@ -19,7 +19,8 @@ import HomeScreen from './pages/HomeScreen';
 import NavigatingScreen from './pages/NavigatingScreen';
 import VeryCloseScreen from './pages/VeryCloseScreen';
 import MatchedScreen from './pages/MatchedScreen';
-import { sendPresence } from './src/pairingApi';
+import { sendPresence, getPairedUserLocation } from './src/pairingApi';
+
 
 
 
@@ -94,7 +95,7 @@ const userId = userIdRef.current;
 
   /* 📍 GPS — foreground only */
   useEffect(() => {
-  if (machineState !== 'DATE_MODE_ON') return;
+  if (machineState !== 'DATE_MODE_ON' && machineState !== 'NAVIGATING') return;
 
   const watchId = Geolocation.watchPosition(
     pos => {
@@ -105,32 +106,28 @@ const userId = userIdRef.current;
           longitude: pos.coords.longitude,
         };
 
-        // MOCK candidate (temporary, fine for now)
-        const candidate: LatLng = {
-          latitude: user.latitude + 0.0007,
-          longitude: user.longitude + 0.0007,
-        };
-
         setUserLocation(user);
-        setCandidateLocation(candidate);
 
-        const dist = distanceInMeters(user, candidate);
+        try {
+          const res = await sendPresence(
+            userId,
+            user.latitude,
+            user.longitude
+          );
 
-        if (dist < 1000) {
-          try {
-            const res = await sendPresence(
-              userId,
-              user.latitude,
-              user.longitude
-            );
-
-            if (res.status === 'PAIRED') {
-              setPairId(res.pairId);
-              dispatchMachine('NEARBY_DETECTED');
-            }
-          } catch (err) {
-            console.warn('sendPresence failed', err);
+          if (res.status === 'PAIRED' && machineState === 'DATE_MODE_ON') {
+            setPairId(res.pairId);
+            
+            // Set real candidate location from server response
+            setCandidateLocation({
+              latitude: res.otherUser.lat,
+              longitude: res.otherUser.lon,
+            });
+            
+            dispatchMachine('NEARBY_DETECTED');
           }
+        } catch (err) {
+          console.warn('sendPresence failed', err);
         }
       })();
     },
@@ -144,6 +141,30 @@ const userId = userIdRef.current;
   return () => Geolocation.clearWatch(watchId);
 }, [machineState]);
 
+  /* 🔄 Poll paired user's location during navigation */
+  useEffect(() => {
+    if (machineState !== 'NAVIGATING' || !pairId) return;
+
+    const pollLocation = async () => {
+      try {
+        const location = await getPairedUserLocation(pairId, userId);
+        setCandidateLocation({
+          latitude: location.lat,
+          longitude: location.lon,
+        });
+      } catch (err) {
+        console.warn('Failed to fetch paired user location', err);
+      }
+    };
+
+    // Poll every 5 seconds
+    const interval = setInterval(pollLocation, 2000);
+    
+    // Fetch immediately
+    pollLocation();
+
+    return () => clearInterval(interval);
+  }, [machineState, pairId, userId]);
 
   /* 🔔 Notification permission */
   useEffect(() => {
