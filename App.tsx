@@ -19,7 +19,8 @@ import HomeScreen from './pages/HomeScreen';
 import NavigatingScreen from './pages/NavigatingScreen';
 import VeryCloseScreen from './pages/VeryCloseScreen';
 import MatchedScreen from './pages/MatchedScreen';
-import { sendPresence, getPairedUserLocation } from './src/pairingApi';
+import { sendPresence, getPairedUserLocation, clearPresence, login, signup, setAuthToken } from './src/pairingApi';
+import LoginScreen from './pages/LoginScreen';
 
 
 
@@ -30,6 +31,8 @@ const Stack = createNativeStackNavigator();
 
 const DATE_MODE_KEY = 'DATE_MODE_ENABLED';
 const SESSION_START_KEY = 'DATE_SESSION_STARTED_AT';
+const USER_ID_KEY = 'DATE_USER_ID';
+const AUTH_TOKEN_KEY = 'DATE_AUTH_TOKEN';
 
 /* ---------- types ---------- */
 
@@ -60,15 +63,16 @@ function distanceInMeters(a: LatLng, b: LatLng): number {
 /* ---------- app ---------- */
 
 export default function App() {
-  const userIdRef = useRef<string>(
-  Math.random().toString(36).slice(2)
-);
-const userId = userIdRef.current;
+  const userIdRef = useRef<string | null>(null);
+  const [userId, setUserId] = useState<string | null>(null);
+  const [authToken, setAuthTokenState] = useState<string | null>(null);
   const [pairId, setPairId] = useState<string | null>(null);
   const hasTriggeredVeryClose = useRef<boolean>(false);
 
 
   const [loading, setLoading] = useState<boolean>(true);
+  const [authError, setAuthError] = useState<string>('');
+  const [authLoading, setAuthLoading] = useState<boolean>(false);
   const [sessionStartedAt, setSessionStartedAt] = useState<number | null>(null);
   const [, forceTick] = useState<number>(0);
 
@@ -97,6 +101,7 @@ const userId = userIdRef.current;
 
   /* 📍 GPS — foreground only */
   useEffect(() => {
+  if (!userId) return;
   if (machineState !== 'DATE_MODE_ON' && machineState !== 'NAVIGATING') return;
 
   const watchId = Geolocation.watchPosition(
@@ -141,11 +146,11 @@ const userId = userIdRef.current;
   );
 
   return () => Geolocation.clearWatch(watchId);
-}, [machineState]);
+}, [machineState, userId]);
 
   /* 🔄 Poll paired user's location during navigation */
   useEffect(() => {
-    if (machineState !== 'NAVIGATING' || !pairId) return;
+    if (machineState !== 'NAVIGATING' || !pairId || !userId) return;
 
     const pollLocation = async () => {
       try {
@@ -209,9 +214,21 @@ const userId = userIdRef.current;
   /* 🔁 Rehydrate */
   useEffect(() => {
     const load = async () => {
-      const dm = await AsyncStorage.getItem(DATE_MODE_KEY);
-      const ss = await AsyncStorage.getItem(SESSION_START_KEY);
-      
+      const [dm, ss, storedUserId, storedAuthToken] = await Promise.all([
+        AsyncStorage.getItem(DATE_MODE_KEY),
+        AsyncStorage.getItem(SESSION_START_KEY),
+        AsyncStorage.getItem(USER_ID_KEY),
+        AsyncStorage.getItem(AUTH_TOKEN_KEY),
+      ]);
+
+      if (storedAuthToken) {
+        setAuthTokenState(storedAuthToken);
+        setAuthToken(storedAuthToken);
+      }
+
+      const uid = storedUserId ?? null;
+      userIdRef.current = uid;
+      setUserId(uid);
 
       if (dm === 'true') dispatchMachine('DATE_MODE_ENABLED');
       if (ss) setSessionStartedAt(Number(ss));
@@ -222,6 +239,44 @@ const userId = userIdRef.current;
     load();
   }, []);
 
+  const completeAuth = async (res: { token: string; userId: string }) => {
+    setAuthTokenState(res.token);
+    setAuthToken(res.token);
+    setUserId(res.userId);
+    userIdRef.current = res.userId;
+    await Promise.all([
+      AsyncStorage.setItem(AUTH_TOKEN_KEY, res.token),
+      AsyncStorage.setItem(USER_ID_KEY, res.userId),
+    ]);
+    dispatchMachine('DATE_MODE_DISABLED');
+  };
+
+  const handleLogin = async (username: string, password: string) => {
+    setAuthLoading(true);
+    setAuthError('');
+    try {
+      const res = await login(username, password);
+      await completeAuth(res);
+    } catch (e) {
+      setAuthError(e instanceof Error ? e.message : 'Invalid username or password');
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
+  const handleSignup = async (username: string, password: string) => {
+    setAuthLoading(true);
+    setAuthError('');
+    try {
+      const res = await signup(username, password);
+      await completeAuth(res);
+    } catch (e) {
+      setAuthError(e instanceof Error ? e.message : 'Signup failed. Try another username.');
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
   /* 💾 Persist */
   useEffect(() => {
     const active = machineState !== 'IDLE';
@@ -230,8 +285,9 @@ const userId = userIdRef.current;
     if (!active) {
       AsyncStorage.removeItem(SESSION_START_KEY);
       setSessionStartedAt(null);
+      if (userId) clearPresence(userId);
     }
-  }, [machineState]);
+  }, [machineState, userId]);
 
   /* 📱 AppState */
   useEffect(() => {
@@ -258,6 +314,14 @@ const userId = userIdRef.current;
   }, [machineState, isForeground]);
 
   if (loading) return null;
+
+  if (!authToken || !userId) {
+    return (
+      <SafeAreaProvider>
+        <LoginScreen onLogin={handleLogin} onSignup={handleSignup} loading={authLoading} error={authError} />
+      </SafeAreaProvider>
+    );
+  }
 
   return (
     <SafeAreaProvider>
@@ -289,6 +353,8 @@ const userId = userIdRef.current;
                       machineState={machineState}
                       dispatchMachine={dispatchMachine}
                       sessionStartedAt={sessionStartedAt}
+                      userId={userId}
+                      pairId={pairId}
                     />
                   );
               }

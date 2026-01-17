@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   View,
   Text,
@@ -6,18 +6,50 @@ import {
   Switch,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { sendDecision } from '../src/pairingApi';
 
 export default function HomeScreen({
   machineState,
   dispatchMachine,
   sessionStartedAt,
+  userId,
+  pairId,
 }) {
   const dateModeActive = machineState !== 'IDLE';
+  const [decisionLoading, setDecisionLoading] = useState(false);
+  const [errorMsg, setErrorMsg] = useState('');
 
   const getActiveDuration = () => {
     if (!sessionStartedAt) return '';
     const min = Math.floor((Date.now() - sessionStartedAt) / 60000);
     return min < 1 ? 'Active just now' : `Active for ${min} min`;
+  };
+
+  const handleDecision = async (decision) => {
+    if (!pairId || !userId) return;
+    setDecisionLoading(true);
+    setErrorMsg('');
+
+    try {
+      const res = await sendDecision(pairId, userId, decision);
+
+      if (res.status === 'WAITING_OTHER') {
+        dispatchMachine('WAITING_OTHER');
+      } else if (res.status === 'EXPIRED' || res.result === 'CANCELLED') {
+        dispatchMachine('PARTNER_DECLINED');
+      } else if (res.status === 'WAITING_OTHER') {
+        dispatchMachine('WAITING_OTHER');
+      } else if (res.status === 'BOTH_ACCEPTED' || res.result === 'MATCH_CONFIRMED') {
+        dispatchMachine('BOTH_ACCEPTED');
+      } else {
+        // fallback: if server returns BOTH_ACCEPTED as result
+        if (res.result === 'BOTH_ACCEPTED') dispatchMachine('BOTH_ACCEPTED');
+      }
+    } catch (e) {
+      setErrorMsg('Failed to send decision. Please try again.');
+    } finally {
+      setDecisionLoading(false);
+    }
   };
 
   return (
@@ -68,18 +100,42 @@ export default function HomeScreen({
             <View style={styles.nearbyActions}>
               <Text
                 style={[styles.btn, styles.accept]}
-                onPress={() => dispatchMachine('USER_ACCEPTED')}
+                onPress={() => handleDecision('ACCEPT')}
               >
-                Accept
+                {decisionLoading ? 'Sending...' : 'Accept'}
               </Text>
               <Text
                 style={[styles.btn, styles.decline]}
-                onPress={() => dispatchMachine('USER_DECLINED')}
+                onPress={() => handleDecision('DECLINE')}
               >
                 Decline
               </Text>
             </View>
           </View>
+        )}
+
+        {machineState === 'AWAITING_CONFIRMATION' && (
+          <View style={styles.waitCard}>
+            <Text style={styles.waitTitle}>Waiting for them to accept…</Text>
+            <Text style={styles.waitSubtitle}>You accepted. We’ll start navigation when they accept.</Text>
+          </View>
+        )}
+
+        {machineState === 'CANCELLED' && (
+          <View style={styles.declineCard}>
+            <Text style={styles.declineTitle}>Better luck next time</Text>
+            <Text style={styles.declineSubtitle}>The other person declined. Date Mode stays on to find someone else.</Text>
+            <Text
+              style={[styles.btn, styles.primary]}
+              onPress={() => dispatchMachine('DATE_MODE_ENABLED')}
+            >
+              Keep looking
+            </Text>
+          </View>
+        )}
+
+        {!!errorMsg && (
+          <Text style={styles.error}>{errorMsg}</Text>
         )}
 
         {/* DEBUG */}
@@ -113,4 +169,14 @@ const styles = StyleSheet.create({
   decline: { backgroundColor: '#fee2e2', color: '#991b1b' },
 
   debug: { marginTop: 20, color: '#2563eb', fontWeight: '600' },
+
+  waitCard: { marginTop: 24, padding: 20, borderRadius: 16, backgroundColor: '#e0f2fe' },
+  waitTitle: { fontSize: 18, fontWeight: '700', color: '#075985' },
+  waitSubtitle: { color: '#0ea5e9', marginTop: 8 },
+
+  declineCard: { marginTop: 24, padding: 20, borderRadius: 16, backgroundColor: '#fef2f2' },
+  declineTitle: { fontSize: 18, fontWeight: '700', color: '#991b1b' },
+  declineSubtitle: { color: '#b91c1c', marginTop: 8, marginBottom: 12 },
+  primary: { backgroundColor: '#2563eb', color: '#fff', textAlign: 'center' },
+  error: { marginTop: 12, color: '#b91c1c' },
 });

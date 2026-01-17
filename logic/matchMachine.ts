@@ -16,6 +16,9 @@ export type MatchEvent =
   | 'NEARBY_DETECTED'
   | 'USER_ACCEPTED'
   | 'USER_DECLINED'
+  | 'WAITING_OTHER'
+  | 'BOTH_ACCEPTED'
+  | 'PARTNER_DECLINED'
   | 'DIRECTION_CORRECT'
   | 'DIRECTION_WRONG'
   | 'DISTANCE_DECREASING'
@@ -41,8 +44,15 @@ export function matchReducer(
       return state;
 
     case 'NEARBY_CANDIDATE_FOUND':
-      if (event === 'USER_ACCEPTED') return 'NAVIGATING';
-      if (event === 'USER_DECLINED') return 'DATE_MODE_ON';
+      if (event === 'USER_ACCEPTED') return 'AWAITING_CONFIRMATION';
+      if (event === 'USER_DECLINED') return 'CANCELLED';
+      return state;
+
+    case 'AWAITING_CONFIRMATION':
+      if (event === 'WAITING_OTHER') return 'AWAITING_CONFIRMATION';
+      if (event === 'BOTH_ACCEPTED') return 'NAVIGATING';
+      if (event === 'PARTNER_DECLINED') return 'CANCELLED';
+      if (event === 'USER_DECLINED') return 'CANCELLED';
       return state;
 
     case 'NAVIGATING':
@@ -55,7 +65,8 @@ export function matchReducer(
       return state;
 
     case 'CANCELLED':
-      return 'DATE_MODE_ON';
+      if (event === 'DATE_MODE_ENABLED') return 'DATE_MODE_ON';
+      return state;
 
     case 'MATCHED':
       return 'IDLE';
