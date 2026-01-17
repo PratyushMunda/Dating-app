@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { View, Text, StyleSheet, Alert, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { BleManager, State } from 'react-native-ble-plx';
+import { Buffer } from 'buffer';
 
 const RSSI_THRESHOLD = -60; // ~1–3 meters
 
@@ -29,6 +30,19 @@ export default function VeryCloseScreen({ dispatchMachine }) {
   useEffect(() => {
     if (!bluetoothReady) return;
 
+    const looksLikeIrlDate = device => {
+      if (device?.name?.startsWith('IRLDate')) return true;
+      if (device?.manufacturerData) {
+        try {
+          const decoded = Buffer.from(device.manufacturerData, 'base64').toString('utf-8');
+          return decoded.startsWith('IRLDate-');
+        } catch (e) {
+          return false;
+        }
+      }
+      return false;
+    };
+
     manager.startDeviceScan(
       null,
       { allowDuplicates: true },
@@ -38,7 +52,7 @@ export default function VeryCloseScreen({ dispatchMachine }) {
           return;
         }
 
-        if (device?.name?.startsWith('IRLDate')) {
+        if (looksLikeIrlDate(device)) {
           if (device.rssi && device.rssi > RSSI_THRESHOLD) {
             manager.stopDeviceScan();
             dispatchMachine('MATCH_CONFIRMED');

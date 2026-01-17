@@ -65,6 +65,7 @@ export default function App() {
 );
 const userId = userIdRef.current;
   const [pairId, setPairId] = useState<string | null>(null);
+  const hasTriggeredVeryClose = useRef<boolean>(false);
 
 
   const [loading, setLoading] = useState<boolean>(true);
@@ -89,6 +90,7 @@ const userId = userIdRef.current;
       PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
       PermissionsAndroid.PERMISSIONS.BLUETOOTH_SCAN,
       PermissionsAndroid.PERMISSIONS.BLUETOOTH_CONNECT,
+      PermissionsAndroid.PERMISSIONS.BLUETOOTH_ADVERTISE,
     ]);
   }
 }, []);
@@ -165,6 +167,35 @@ const userId = userIdRef.current;
 
     return () => clearInterval(interval);
   }, [machineState, pairId, userId]);
+
+  /* 📡 Start/stop BLE advertising for close-range detection */
+  useEffect(() => {
+    if (!DateMode || !DateMode.startAdvertising) return;
+
+    if (machineState === 'NAVIGATING') {
+      DateMode.startAdvertising(userId);
+      return () => DateMode.stopAdvertising && DateMode.stopAdvertising();
+    }
+
+    DateMode.stopAdvertising && DateMode.stopAdvertising();
+  }, [machineState, userId]);
+
+  /* 📏 Auto-trigger very-close when within 25m (fallback when BLE is unavailable) */
+  useEffect(() => {
+    if (machineState !== 'NAVIGATING') {
+      hasTriggeredVeryClose.current = false;
+      return;
+    }
+
+    if (!userLocation || !candidateLocation) return;
+
+    const dist = distanceInMeters(userLocation, candidateLocation);
+
+    if (dist < 25 && !hasTriggeredVeryClose.current) {
+      hasTriggeredVeryClose.current = true;
+      dispatchMachine('BLUETOOTH_CLOSE');
+    }
+  }, [machineState, userLocation, candidateLocation]);
 
   /* 🔔 Notification permission */
   useEffect(() => {
