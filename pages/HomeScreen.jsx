@@ -1,12 +1,14 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   Switch,
+  Vibration,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { sendDecision } from '../src/pairingApi';
+import Sound from 'react-native-sound';
+import { sendDecision, checkPairStatus } from '../src/pairingApi';
 
 export default function HomeScreen({
   machineState,
@@ -18,6 +20,80 @@ export default function HomeScreen({
   const dateModeActive = machineState !== 'IDLE';
   const [decisionLoading, setDecisionLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
+  const [otherUserStatus, setOtherUserStatus] = useState('PENDING');
+  const soundRef = useRef(null);
+  const hasPlayedSound = useRef(false);
+
+  // Initialize notification sound
+  useEffect(() => {
+    Sound.setCategory('Playback');
+    
+    // Load a system notification sound (you can replace with custom sound file)
+    const sound = new Sound('notification.mp3', Sound.MAIN_BUNDLE, (error) => {
+      if (error) {
+        console.log('Failed to load sound, using vibration only', error);
+        return;
+      }
+      soundRef.current = sound;
+    });
+
+    return () => {
+      if (soundRef.current) {
+        soundRef.current.release();
+      }
+    };
+  }, []);
+
+  // Play notification when someone nearby is detected
+  useEffect(() => {
+    if (machineState === 'NEARBY_CANDIDATE_FOUND' && !hasPlayedSound.current) {
+      hasPlayedSound.current = true;
+      
+      // Play sound
+      if (soundRef.current) {
+        soundRef.current.play((success) => {
+          if (!success) {
+            console.log('Sound playback failed');
+          }
+        });
+      }
+      
+      // Vibrate (pattern: wait 0ms, vibrate 400ms, wait 200ms, vibrate 400ms)
+      Vibration.vibrate([0, 400, 200, 400]);
+    }
+    
+    // Reset flag when leaving this state
+    if (machineState !== 'NEARBY_CANDIDATE_FOUND') {
+      hasPlayedSound.current = false;
+    }
+  }, [machineState]);
+
+  // Poll for status updates when waiting for other user
+  useEffect(() => {
+    if (machineState !== 'AWAITING_CONFIRMATION' || !pairId) {
+      return;
+    }
+
+    const pollInterval = setInterval(async () => {
+      try {
+        const status = await checkPairStatus(pairId);
+        
+        if (status.status === 'BOTH_ACCEPTED') {
+          dispatchMachine('BOTH_ACCEPTED');
+          clearInterval(pollInterval);
+        } else if (status.status === 'CANCELLED') {
+          dispatchMachine('PARTNER_DECLINED');
+          clearInterval(pollInterval);
+        } else if (status.status === 'WAITING_OTHER') {
+          setOtherUserStatus(status.otherUserDecision || 'PENDING');
+        }
+      } catch (e) {
+        console.error('Error polling pair status:', e);
+      }
+    }, 2000); // Poll every 2 seconds
+
+    return () => clearInterval(pollInterval);
+  }, [machineState, pairId]);
 
   const getActiveDuration = () => {
     if (!sessionStartedAt) return '';
@@ -33,20 +109,23 @@ export default function HomeScreen({
     try {
       const res = await sendDecision(pairId, userId, decision);
 
+      if (decision === 'DECLINE') {
+        dispatchMachine('USER_DECLINED');
+        return;
+      }
+
+      // User accepted
       if (res.status === 'WAITING_OTHER') {
-        dispatchMachine('WAITING_OTHER');
-      } else if (res.status === 'EXPIRED' || res.result === 'CANCELLED') {
+        setOtherUserStatus(res.otherUserDecision || 'PENDING');
+        dispatchMachine('USER_ACCEPTED');
+      } else if (res.status === 'CANCELLED') {
         dispatchMachine('PARTNER_DECLINED');
-      } else if (res.status === 'WAITING_OTHER') {
-        dispatchMachine('WAITING_OTHER');
-      } else if (res.status === 'BOTH_ACCEPTED' || res.result === 'MATCH_CONFIRMED') {
+      } else if (res.status === 'BOTH_ACCEPTED') {
         dispatchMachine('BOTH_ACCEPTED');
-      } else {
-        // fallback: if server returns BOTH_ACCEPTED as result
-        if (res.result === 'BOTH_ACCEPTED') dispatchMachine('BOTH_ACCEPTED');
       }
     } catch (e) {
       setErrorMsg('Failed to send decision. Please try again.');
+      console.error('Decision error:', e);
     } finally {
       setDecisionLoading(false);
     }
@@ -55,7 +134,7 @@ export default function HomeScreen({
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.card}>
-        <Text style={styles.title}>IRLDate</Text>
+        <Text style={styles.title}>Meet your date</Text>
         <Text style={styles.subtitle}>
           Be open to spontaneous connections
         </Text>
@@ -116,8 +195,22 @@ export default function HomeScreen({
 
         {machineState === 'AWAITING_CONFIRMATION' && (
           <View style={styles.waitCard}>
-            <Text style={styles.waitTitle}>Waiting for them to accept…</Text>
-            <Text style={styles.waitSubtitle}>You accepted. We’ll start navigation when they accept.</Text>
+            <Text style={styles.waitTitle}>✅ You Accepted</Text>
+            <Text style={styles.waitSubtitle}>
+              Waiting for the other person to decide...
+            </Text>
+            <View style={styles.statusIndicator}>
+              <Text style={styles.statusLabel}>Their status:</Text>
+              <Text style={styles.statusValue}>
+                {otherUserStatus === 'PENDING' ? '⏳ Deciding...' : '🤔 Deciding...'}
+              </Text>
+            </View>
+            <Text
+              style={[styles.btn, styles.cancelBtn]}
+              onPress={() => handleDecision('DECLINE')}
+            >
+              Cancel
+            </Text>
           </View>
         )}
 
@@ -138,13 +231,7 @@ export default function HomeScreen({
           <Text style={styles.error}>{errorMsg}</Text>
         )}
 
-        {/* DEBUG */}
-        <Text
-          style={styles.debug}
-          onPress={() => dispatchMachine('NEARBY_DETECTED')}
-        >
-          → Simulate NEARBY_DETECTED
-        </Text>
+      
       </View>
     </SafeAreaView>
   );
@@ -172,7 +259,25 @@ const styles = StyleSheet.create({
 
   waitCard: { marginTop: 24, padding: 20, borderRadius: 16, backgroundColor: '#e0f2fe' },
   waitTitle: { fontSize: 18, fontWeight: '700', color: '#075985' },
-  waitSubtitle: { color: '#0ea5e9', marginTop: 8 },
+  waitSubtitle: { color: '#0ea5e9', marginTop: 8, marginBottom: 12 },
+
+  statusIndicator: { 
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    marginTop: 12,
+    padding: 12,
+    backgroundColor: '#bae6fd',
+    borderRadius: 8
+  },
+  statusLabel: { fontSize: 14, fontWeight: '600', color: '#075985' },
+  statusValue: { fontSize: 14, marginLeft: 8, color: '#0284c7' },
+
+  cancelBtn: { 
+    backgroundColor: '#fee2e2', 
+    color: '#991b1b', 
+    textAlign: 'center',
+    marginTop: 12
+  },
 
   declineCard: { marginTop: 24, padding: 20, borderRadius: 16, backgroundColor: '#fef2f2' },
   declineTitle: { fontSize: 18, fontWeight: '700', color: '#991b1b' },

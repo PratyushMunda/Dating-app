@@ -3,9 +3,11 @@ export type PresenceResponse =
   | { status: 'PAIRED'; pairId: string; otherUser: { userId: string; lat: number; lon: number } };
 
 export type DecisionResponse =
-  | { result: 'MATCH_CONFIRMED' }
-  | { result: 'CANCELLED' }
-  | { status: 'WAITING_OTHER' }
+  | { status: 'MATCH_CONFIRMED' }
+  | { status: 'CANCELLED' }
+  | { status: 'WAITING_OTHER'; otherUserDecision?: string }
+  | { status: 'BOTH_ACCEPTED' }
+  | { status: 'PENDING'; myDecision?: string; otherDecision?: string }
   | { status: 'EXPIRED' };
 
 export type LocationResponse = {
@@ -111,6 +113,13 @@ export async function getPairedUserLocation(
 export async function clearPresence(userId: string): Promise<{ status: string }> {
   const res = await fetch(`${BASE_URL}/presence/${userId}`, {
     method: 'DELETE',
+    headers: withAuth({}),
+  });
+  return res.json();
+}
+
+export async function checkPairStatus(pairId: string): Promise<DecisionResponse> {
+  const res = await fetch(`${BASE_URL}/decision/${pairId}`, {
     headers: withAuth({}),
   });
   return res.json();
