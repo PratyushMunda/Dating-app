@@ -89,15 +89,36 @@ export default function App() {
   
 
   useEffect(() => {
-  if (Platform.OS === 'android') {
-    PermissionsAndroid.requestMultiple([
-      PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
-      PermissionsAndroid.PERMISSIONS.BLUETOOTH_SCAN,
-      PermissionsAndroid.PERMISSIONS.BLUETOOTH_CONNECT,
-      PermissionsAndroid.PERMISSIONS.BLUETOOTH_ADVERTISE,
-    ]);
-  }
-}, []);
+    if (Platform.OS !== 'android') return;
+
+    (async () => {
+      const perms = [
+        PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
+        PermissionsAndroid.PERMISSIONS.ACCESS_COARSE_LOCATION,
+        PermissionsAndroid.PERMISSIONS.BLUETOOTH_SCAN,
+        PermissionsAndroid.PERMISSIONS.BLUETOOTH_CONNECT,
+        PermissionsAndroid.PERMISSIONS.BLUETOOTH_ADVERTISE,
+      ];
+      // Background location is needed only if you expect updates when app isn't foregrounded
+      if (Platform.Version >= 29) {
+        perms.push(PermissionsAndroid.PERMISSIONS.ACCESS_BACKGROUND_LOCATION);
+      }
+      try {
+        const statuses = await PermissionsAndroid.requestMultiple(perms);
+        const fineGranted =
+          statuses[PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION] ===
+          PermissionsAndroid.RESULTS.GRANTED;
+        const coarseGranted =
+          statuses[PermissionsAndroid.PERMISSIONS.ACCESS_COARSE_LOCATION] ===
+          PermissionsAndroid.RESULTS.GRANTED;
+        if (!fineGranted && !coarseGranted) {
+          console.warn('Location permission not granted: ', statuses);
+        }
+      } catch (e) {
+        console.warn('Permission request error', e);
+      }
+    })();
+  }, []);
 
   /* 📍 GPS — foreground only */
   useEffect(() => {
@@ -138,7 +159,9 @@ export default function App() {
         }
       })();
     },
-    err => console.warn(err),
+    err => {
+      console.warn('Geolocation error', err);
+    },
     {
       enableHighAccuracy: true,
       distanceFilter: 10, // meters

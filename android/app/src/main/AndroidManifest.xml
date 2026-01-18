@@ -5,6 +5,9 @@
 <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
 <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+<uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+<!-- Optional: required if you want location updates while in background -->
+<uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
 <!-- Bluetooth -->
 <uses-permission android:name="android.permission.BLUETOOTH" />
 <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" />
@@ -15,7 +18,7 @@
 <uses-permission android:name="android.permission.BLUETOOTH_ADVERTISE" />
 
 <!-- Required for BLE scan -->
-<uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+<!-- Keep a single fine location declaration; coarse covers broader cases on some devices -->
 
 
 
