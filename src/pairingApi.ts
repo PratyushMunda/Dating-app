@@ -23,6 +23,7 @@ let authToken: string | null = null;
 
 export function setAuthToken(token: string | null) {
   authToken = token;
+  console.log('setAuthToken called with:', token ? token.substring(0, 10) + '...' : 'null');
 }
 
 async function parseOrThrow(res: Response, fallback: string) {
@@ -55,7 +56,11 @@ export async function signup(
 }
 
 function withAuth(headers: Record<string, string>) {
-  if (authToken) return { ...headers, Authorization: `Bearer ${authToken}` };
+  if (authToken) {
+    console.log('withAuth: Token found, adding header:', authToken.substring(0, 10) + '...');
+    return { ...headers, Authorization: `Bearer ${authToken}` };
+  }
+  console.warn('withAuth: NO TOKEN SET!');
   return headers;
 }
 
@@ -77,12 +82,30 @@ export async function sendPresence(
   lat: number,
   lon: number
 ): Promise<PresenceResponse> {
+  if (!authToken) {
+    console.error('sendPresence: authToken is null!');
+  }
+  
+  const headers = withAuth({ 'Content-Type': 'application/json' });
+  console.log('sendPresence: Full headers:', JSON.stringify(headers));
+  console.log('sendPresence: Auth header present?', !!headers.Authorization);
+  console.log('sendPresence: Sending location', { userId, lat, lon, hasAuth: !!authToken });
+  
   const res = await fetch(`${BASE_URL}/presence`, {
     method: 'POST',
-    headers: withAuth({ 'Content-Type': 'application/json' }),
+    headers,
     body: JSON.stringify({ userId, lat, lon }),
   });
 
+  console.log('sendPresence: Response status:', res.status);
+  console.log('sendPresence: Response ok:', res.ok);
+
+  if (!res.ok) {
+    const text = await res.text();
+    console.error('sendPresence failed:', res.status, text);
+    throw new Error(`Presence failed: ${res.status} - ${text}`);
+  }
+  
   return res.json();
 }
 

@@ -59,7 +59,11 @@ export default function HomeScreen({
       }
       
       // Vibrate (pattern: wait 0ms, vibrate 400ms, wait 200ms, vibrate 400ms)
-      Vibration.vibrate([0, 400, 200, 400]);
+      try {
+        Vibration.vibrate([0, 400, 200, 400]);
+      } catch (e) {
+        console.log('Vibration failed:', e);
+      }
     }
     
     // Reset flag when leaving this state

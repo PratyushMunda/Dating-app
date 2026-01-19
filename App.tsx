@@ -122,8 +122,59 @@ export default function App() {
 
   /* 📍 GPS — foreground only */
   useEffect(() => {
-  if (!userId) return;
-  if (machineState !== 'DATE_MODE_ON' && machineState !== 'NAVIGATING') return;
+  if (!userId) {
+    console.log('GPS effect: no userId');
+    return;
+  }
+  if (!authToken) {
+    console.log('GPS effect: no authToken yet, waiting...');
+    return;
+  }
+  if (machineState !== 'DATE_MODE_ON' && machineState !== 'NAVIGATING') {
+    console.log('GPS effect: wrong machine state:', machineState);
+    return;
+  }
+
+  console.log('GPS effect triggered:', { machineState, userId, hasAuth: !!authToken });
+
+  // Send an immediate presence ping on toggle (some devices don't fire an initial watch callback)
+  Geolocation.getCurrentPosition(
+    pos => {
+      (async () => {
+        const user: LatLng = {
+          latitude: pos.coords.latitude,
+          longitude: pos.coords.longitude,
+        };
+
+        setUserLocation(user);
+
+        try {
+          const res = await sendPresence(
+            userId,
+            user.latitude,
+            user.longitude
+          );
+
+          console.log('sendPresence response:', res);
+
+          if (res.status === 'PAIRED' && machineState === 'DATE_MODE_ON') {
+            setPairId(res.pairId);
+            setCandidateLocation({
+              latitude: res.otherUser.lat,
+              longitude: res.otherUser.lon,
+            });
+            dispatchMachine('NEARBY_DETECTED');
+          }
+        } catch (err) {
+          console.warn('sendPresence (initial) failed', err);
+        }
+      })();
+    },
+    err => {
+      console.warn('getCurrentPosition error', err);
+    },
+    { enableHighAccuracy: true, timeout: 20000, maximumAge: 5000 }
+  );
 
   const watchId = Geolocation.watchPosition(
     pos => {
@@ -165,11 +216,13 @@ export default function App() {
     {
       enableHighAccuracy: true,
       distanceFilter: 10, // meters
+      timeout: 20000,
+      maximumAge: 5000,
     }
   );
 
   return () => Geolocation.clearWatch(watchId);
-}, [machineState, userId]);
+}, [machineState, userId, authToken]);
 
   /* 🔄 Poll paired user's location during navigation */
   useEffect(() => {
@@ -263,6 +316,7 @@ export default function App() {
   }, []);
 
   const completeAuth = async (res: { token: string; userId: string }) => {
+    console.log('completeAuth: Setting token and userId:', { token: res.token.substring(0, 10) + '...', userId: res.userId });
     setAuthTokenState(res.token);
     setAuthToken(res.token);
     setUserId(res.userId);
